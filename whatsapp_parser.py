@@ -3,32 +3,33 @@ import pandas as pd
 import numpy as np
 import datetime
 import matplotlib.pyplot as plt
-import seaborn as sns
 import urllib
 import emoji as emoji_util
 import re
 import spacy
 from wordcloud import WordCloud, STOPWORDS
 from nltk import ngrams
-import chart_studio.plotly as py
-import cufflinks as cf
-import plotly.express as px
-import plotly.graph_objects as go
+#import chart_studio.plotly as py
+#import cufflinks as cf
+#import plotly.express as px
+#import plotly.graph_objects as go
 from scipy.signal import find_peaks
 
 
 # TODO:
-    # assign self. variables from functions
-    
+    # assign self. variables from functions, redo docstrings
+    # function for loading and parsing end to end
+    # function to extract unique senders from chat
+
 class Chat:
-    def __init__(self):
+    def __init__(self, path_to_chat: str = ""):
         self.senders = []
         self.chat_raw = []
         self.chat_df = pd.DataFrame()
-        self.chat_format = ""
-        self.path_to_chat = ""
+        self.chat_format = None
+        self.path_to_chat = path_to_chat
         
-    def load_chat_file(path_to_chat: str) -> List[str]:      
+    def load_chat_file(self, path_to_chat: str) -> List[str]:
         """
         Load a whatsapp chat export .txt file
 
@@ -56,9 +57,9 @@ class Chat:
             # delete last entry because it contains only "\n"
             del chat[-1]
             
-            return chat #type(list)
+            self.chat_raw = chat #type(list)
         
-    def determine_chat_format(chat_raw: list) -> str:
+    def determine_chat_format(self, chat_raw: list) -> str:
         """
         Find out what device was used to export the chat file.
         Android format is different from iOS in terms of timestamp.
@@ -83,10 +84,10 @@ class Chat:
         
         result_list = []
         
-        for n in np.random.randint(0, high=len(chat_raw), size=20):
-            if str(chat_raw[n]).startswith('['):     
+        for n in np.random.randint(0, high=len(self.chat_raw), size=20):
+            if str(self.chat_raw[n]).startswith('['):
                 result_list.append(1)
-            elif str(chat_raw[n])[0].isdigit():
+            elif str(self.chat_raw[n])[0].isdigit():
                 result_list.append(0)
             else:
                 continue
@@ -96,13 +97,13 @@ class Chat:
             raise UnknownChatFormat
     
         if result > 0.9:
-            return "ios"
+            self.chat_format = "ios"
         elif result < 0.1:
-            return "android"
+            self.chat_format = "android"
         else:
             raise UnknownChatFormat()
         
-    def check_message_integrity_ios(chat_raw: List[str]) -> List[str]:
+    def check_message_integrity_ios(self.chat_raw: List[str]) -> List[str]:
         """
         Check if line is a valid ios message with timestamp, sender and message.
         Sometimes lines are cut of by CRLF respectively \n in this case.
@@ -182,7 +183,7 @@ class Chat:
         return chat_raw #type(list)
     
     
-    def parse_date_ios(line: str) -> datetime.datetime:
+    def parse_date_ios(line: str) -> datetime.datetime or str:
         """
         Takes single element of chat_raw of an ios chat_raw and returns date.
 
@@ -207,7 +208,7 @@ class Chat:
             return "unparsable"
         
     
-    def parse_date_android(line: str) -> datetime.datetime:
+    def parse_date_android(line: str) -> datetime.datetime or str:
         """
         Takes single element of chat_raw of an android chat_raw 
         and returns its date.
@@ -539,7 +540,7 @@ class Chat:
             DESCRIPTION.
 
         """
-        ''''''
+
         n_grams = ngrams(message, n)
         return [n for n in n_grams]
     
@@ -776,3 +777,4 @@ class UnknownChatFormat(Exception):
         
         
 chat_ = Chat()
+chat_.load_chat_file('Schimpfwortliste.txt')
