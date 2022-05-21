@@ -64,7 +64,6 @@ class Chat:
         Android format is different from iOS in terms of timestamp.
         iOS: "[dd.mm.yy, HH:MM:SS]"
         Android: "dd.mm.yy, HH:MM:SS"
-        Basicly the same but without the brackets.
 
         Parameters
         ----------
@@ -77,7 +76,7 @@ class Chat:
             returns "ios" or "android" depending on found format.
 
         """
-    
+        
         # take 20 random messages out of the chat and check their format
         ### ANDROID: 0; iOS: 1 ###
         
@@ -101,11 +100,12 @@ class Chat:
             return "android"
         else:
             raise UnknownChatFormat()
+            
         
     def check_message_integrity_ios(chat_raw: List[str]) -> List[str]:
         """
         Check if line is a valid ios message with timestamp, sender and message.
-        Sometimes lines are cut of by CRLF respectively \n in this case.
+        Sometimes lines are split by CRLF respectively \n in this case.
         Put split messages back together in this case.
 
         Parameters
@@ -120,30 +120,29 @@ class Chat:
 
         """
     
-        ## if it's an iOS chat
-        # check if all lines start with '[' and get indices of split messages
+        # get indices of split messages which do not start with '['
         split_messages_idx = [idx for idx, line in enumerate(chat_raw) \
                               if not line.startswith('[')]
     
-        # make sure indices are sorted so chat list indices don't get messed
-        # up when deleting indices
+        # iterate from bottom to top to not mess up indices
+        # when deleting entries
         for idx in sorted(split_messages_idx, reverse=True):
             # iterate over split messages and
             # merge them with the message send before
-            merged_message = chat_raw[idx-1] + ' ' + chat_raw[idx] #type(str)
+            merged_message = chat_raw[idx-1] + ' ' + chat_raw[idx] # str
             chat_raw[idx-1] = merged_message
             
-            # delete split messages by index after merging
+            # delete original split message by index after merging
             del chat_raw[idx]   
         
-        return chat_raw #type(list)
+        return chat_raw # List[str]
 
 
     def check_message_integrity_android(chat_raw: List[str]) -> List[str]:
         """
         Check if line is a valid android message with timestamp, 
         sender and message.
-        Sometimes lines are cut of by CRLF respectively \n in this case.
+        Sometimes lines are cut off by CRLF respectively \n in this case.
         Put split messages back together in this case.
 
         Parameters
@@ -157,8 +156,7 @@ class Chat:
             Returns integrity checked chat_raw.
 
         """
-    
-        ## if it's an android chat
+
         # check if all lines start with a timestamp and
         # get indices of split messages
         split_messages_idx = []
@@ -168,18 +166,18 @@ class Chat:
             except ValueError:
                 split_messages_idx.append(idx)
     
-        # make sure indices are sorted so chat list indices don't get
-        # messed up when deleting indices
+        # iterate from bottom to top to not mess up indices
+        # when deleting entries
         for idx in sorted(split_messages_idx, reverse=True):
             # iterate over split messages and merge them with the
             # message send before
-            merged_message = chat_raw[idx-1] + ' ' + chat_raw[idx] #type(str)
+            merged_message = chat_raw[idx-1] + ' ' + chat_raw[idx] # str
             chat_raw[idx-1] = merged_message
             
             # delete split messages by index after merging
             del chat_raw[idx]
         
-        return chat_raw #type(list)
+        return chat_raw # List[str]
     
     
     def parse_date_ios(line: str) -> datetime.datetime:
@@ -189,19 +187,19 @@ class Chat:
         Parameters
         ----------
         line : str
-            single message (list element of chat_raw).
+            single message (list entry of chat_raw).
 
         Returns
         -------
         datetime.datetime
-            returns datetime.datetime of chat message.
+            returns happened datetime.datetime of chat message.
 
         """
         # split every line of chat between the first brackets
         try:
             date_string = line.split('[')[1].split(']')[0]
             # create datetime obj from remaining date format dd.mm.yy, HH:MM:SS
-            message_date = datetime.datetime.strptime(date_string, '%d.%m.%y, %H:%M:%S') # type(datetime.datetime)
+            message_date = datetime.datetime.strptime(date_string, '%d.%m.%y, %H:%M:%S') # datetime.datetime
             return message_date
         except:
             return "unparsable"
@@ -215,19 +213,19 @@ class Chat:
         Parameters
         ----------
         line : str
-            single message (list element of chat_raw).
+            single message (list entry of chat_raw).
 
         Returns
         -------
         datetime.datetime
-            returns datetime.datetime of chat message.
+            returns happened datetime.datetime of chat message.
 
         """
         # split every line of chat after "-"
         date_string = line.split('-')[0].strip()
         # create datetime obj from remaining date format dd.mm.yy, HH:MM:SS
         try:
-            message_date = datetime.datetime.strptime(date_string, '%d.%m.%y, %H:%M') # type(datetime.datetime)
+            message_date = datetime.datetime.strptime(date_string, '%d.%m.%y, %H:%M') # datetime.datetime
             return message_date
         except IndexError:
             return "unparsable"
@@ -240,7 +238,7 @@ class Chat:
         Parameters
         ----------
         line : str
-            single message (list element of chat_raw).
+            single message (list entry of chat_raw).
 
         Returns
         -------
@@ -262,7 +260,7 @@ class Chat:
         Parameters
         ----------
         line : str
-            single message (list element of chat_raw).
+            single message (list entry of chat_raw).
 
         Returns
         -------
@@ -285,7 +283,7 @@ class Chat:
         Parameters
         ----------
         line : str
-            single message (list element of chat_raw).
+            single message (list entry of chat_raw).
 
         Returns
         -------
@@ -293,9 +291,9 @@ class Chat:
             returns only the actual message.
 
         """
-        # therefore split at 3rd ':', which indicates message start after sender tag
+        # split at 3rd ':', which indicates message start after sender tag
         try:
-            return line.split(':', 3)[3].strip() #type(str)
+            return line.split(':', 3)[3].strip() # str
         except:
             return "unparsable"
 
@@ -329,7 +327,7 @@ class Chat:
         Parameters
         ----------
         message : str
-            message element of chat_df.
+            single message (list element of chat_raw).
 
         Returns
         -------
@@ -344,12 +342,12 @@ class Chat:
     
     def demojize_message(message: str) -> str:
         """
-        Remove emojis from message text
+        Remove emojis from message text.
 
         Parameters
         ----------
         message : str
-            message element of chat_df.
+            single message (list element of chat_raw).
 
         Returns
         -------
@@ -357,72 +355,41 @@ class Chat:
             returns a demojized string.
 
         """
-        ''''''
         # find all emojis in message
         emojis_in_message = [char for char in message if char in emoji_util.UNICODE_EMOJI['en']]
-        # delete all given emojis from message
+        # replace all emojis in message with whitespace
         for emoji in emojis_in_message:
-            message = message.replace(emoji, '')
+            message = message.replace(emoji, ' ')
         
         return message
 
 
-    def calc_time_diff(chat_df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Iterate over chat_df and annotate time between messages
-
-        Parameters
-        ----------
-        chat_df : pd.DataFrame
-            The dataframe representation of the chat.
-
-        Returns
-        -------
-        chat_df : pd.DataFrame
-            The chat_df annotated with time between messages.
-
-        """
-        
-        for idx, row in chat_df.iterrows():
-    
-            if idx == 0:
-                # first message has no time diff
-                continue
-    
-            timestamp_b = row['timestamp']
-            timestamp_a = chat_df.iloc[idx-1]['timestamp']
-            time_delta = timestamp_b - timestamp_a
-            chat_df.at[idx, 'time_diff'] = time_delta
-                    
-        return chat_df
-
-
     def annotate_message_types(chat_df: pd.DataFrame,
                                chat_format: str,
-                               answer_time_threshold: 
+                               reply_time_threshold: 
                                    datetime.timedelta=datetime.timedelta(days=2)
                                ) -> pd.DataFrame:
         
         """
-        Iterate over chat_df and check if message is an answer, 
-        follow up or new initiation.
+        Iterate over chat_df and check if message is an reply, 
+        follow up or new initiation of the conversation.
         
         ################ EXAMPLE ####################
-        ## [MSG_A] day1 10:00 sender_a: HI!
-        ## [MSG B] day1 10:05 sender_b: Hi!
-        ## --> then MSG B is an answer
-        
-        ## [MSG_A] day1 10:00 sender_a: bye!
-        ## [MSG B] day9 12:05 sender_b: long time no see!
-        ## --> then MSG B is a new initiation
-        
-        ## [MSG_A] day1 10:00 sender_a: hello?!?!?!
-        ## [MSG B] day4 01:05 sender_a: hellooooooo?!
-        ## --> then MSG B is also a new initiation
-        
-        ## [MSG_A] day1 10:00 sender_a: can you bring me something from the store?
-        ## [MSG B] day1 12:05 sender_a: some milk and icecream!
-        ## --> then MSG B is a follow up
+        # [MSG_A] day1 10:00 sender_a: HI!
+        # [MSG B] day1 10:05 sender_b: Hi!
+        # --> MSG B is an reply from sender_b
+        #
+        # [MSG_A] day1 10:00 sender_a: bye!
+        # [MSG B] day9 12:05 sender_b: long time no see!
+        # --> MSG B is a new initiation of the conversation after a longer period of time
+        #
+        # [MSG_A] day1 10:00 sender_a: hello!
+        # [MSG B] day4 01:05 sender_a: hellooooooo?!
+        # --> MSG B is also a new initiation by sender_a
+        #
+        # [MSG_A] day1 10:00 sender_a: can you bring me something from the store?
+        # [MSG B] day1 12:01 sender_a: some milk and icecream!
+        # --> MSG B is a follow up by the same sender
         #############################################
         
         Parameters
@@ -431,11 +398,11 @@ class Chat:
             The dataframe representation of the chat.
             
         chat_format : str
-            The format of the chat. Either "ios" or "android".
+            Chat format, either "ios" or "android".
             
         answer_time_threshold : datetime.timedelta
-            Threshold between two messages that differentiates a new initiation
-            from an answer or follow up to a previous message.
+            Timedelta threshold between two messages indicates a new initiation
+            of the conversation.
 
         Returns
         -------
@@ -446,13 +413,15 @@ class Chat:
         
         if chat_format == 'ios':
             media_identification_msg = "Bild weggelassen"
-        if chat_format == 'android':
+        elif chat_format == 'android':
             media_identification_msg = "<Medien ausgeschlossen>"
+        else:
+            raise UnknownChatFormat()
         
         for idx, row in chat_df.iterrows():
     
             if idx == 0:
-                # first message is always an initiation and has no time diff or answer time
+                # first message is always an initiation and has no time diff or reply time
                 chat_df.at[idx, 'message_type'] = "initiation"
                 chat_df.at[idx, 'is_media'] = False
                 continue
@@ -465,35 +434,33 @@ class Chat:
             else:
                 chat_df.at[idx, 'is_media'] = False
             
-            
+            # get sender and time_diff between messages
             sender_b = row['sender']
             sender_a = chat_df.iloc[idx-1]['sender']
-            time_delta = row['time_diff'] #type(datetime.timedelta)
-    
+            time_delta = row['time_diff'] # datetime.timedelta
+            
+            # determine wheather the message is a reply, follow up or initiation
             if sender_b == sender_a:
-                if time_delta < answer_time_threshold:
+                if time_delta < reply_time_threshold:
                     # if sender_a and sender_b are the same and 
-                    # time between the two messages is < answer_time_threshold,
+                    # time between the two messages is < reply_time_threshold,
                     # then it's a "follow up"
                     chat_df.at[idx, 'message_type'] = "follow_up"
-    
                 else:
-                    # if between messages is > answer_time_threshold, 
+                    # if between messages is > reply_time_threshold, 
                     # then it's a new initiation of the conversation
-                    # the recipient didn't respond :(
+                    # the recipient didn't respond to the previous message :(
                     chat_df.at[idx, 'message_type'] = "initiation"
     
-    
             if sender_a != sender_b:
-                if time_delta < answer_time_threshold:
+                if time_delta < reply_time_threshold:
                     # if sender_a and sender_b are NOT the same and
-                    # time between the two messages < answer_time_threshold,
-                    # then it's an answer
-                    chat_df.at[idx, 'message_type'] = "answer"
-                    chat_df.at[idx, 'answer_time_seconds'] = time_delta.seconds
-    
+                    # time between the two messages < reply_time_threshold,
+                    # then it's an reply
+                    chat_df.at[idx, 'message_type'] = "reply"
+                    chat_df.at[idx, 'reply_time_seconds'] = time_delta.seconds
                 else:
-                    # if time is > answer_time_threshold then it's a
+                    # if time is > reply_time_threshold then it's a
                     # new initiation (or maybe just a sorry? ¯\_(ツ)_/¯)
                     chat_df.at[idx, 'message_type'] = "initiation"
     
@@ -524,7 +491,7 @@ class Chat:
 
     def get_ngrams(message: str, n: int) -> List[Tuple]:
         """
-        Generate a list of tuples with all ngrams for a given input spacy doc
+        Generate a list of tuples with all ngrams for a given string.
 
         Parameters
         ----------
@@ -536,17 +503,17 @@ class Chat:
         Returns
         -------
         List[Tuple]
-            DESCRIPTION.
+            returns list of tuples with ngrams of the given string.
 
         """
-        ''''''
+
         n_grams = ngrams(message, n)
         return [n for n in n_grams]
     
 
     def annotate_questions(spacy_doc: Any) -> bool:
         """
-        Returns true if message is a question.
+        Returns True if message is a question.
 
         Parameters
         ----------
@@ -642,13 +609,13 @@ class Chat:
     @staticmethod
     def parse_chat(path_to_chat: str) -> pd.DataFrame:
         start_time = datetime.datetime.now()
-        chat = load_chat(path_to_chat) #type(list)
-        chat_format = determine_chat_format(chat) #type(str)
+        chat = load_chat(path_to_chat) # List[str]
+        chat_format = determine_chat_format(chat) # str
         
         if chat_format.lower() == "android":
-            chat = check_message_integrity_android(chat) #type(list)
+            chat = check_message_integrity_android(chat) # List[str]
         elif chat_format.lower() == "ios":
-            chat = check_message_integrity_ios(chat) #type(list)
+            chat = check_message_integrity_ios(chat) # List[str]
         
         chat_df = pd.DataFrame(chat, columns=['message_raw'])
         print(f"df time: {datetime.datetime.now() - start_time}")
@@ -690,7 +657,7 @@ class Chat:
             f"timestamp annotations time: "\
             f"{datetime.datetime.now() - cache_time}")
         
-        # extract emoji stuff
+        # extract emojis
         cache_time = datetime.datetime.now()
         chat_df['emojis'] = chat_df['message'].apply(lambda x: get_emojis(x))
         print(f"emoji extract time: {datetime.datetime.now() - cache_time}")
@@ -699,7 +666,7 @@ class Chat:
             .apply(lambda x: demojize_message(x))
         print(f"demojize time: {datetime.datetime.now() - cache_time}")
     
-        # annotations for message type and answer time
+        # annotations for message type and reply time
         cache_time = datetime.datetime.now()
         chat_df['time_diff'] = chat_df['timestamp'] - chat_df['timestamp'].shift(periods=1)
         chat_df = annotate_message_types(chat_df, chat_format)
@@ -761,8 +728,6 @@ class Chat:
         return chat_df
 
 
-
-
 class UnknownChatFormat(Exception):
     """
     Raised when chat format could not be detected
@@ -772,7 +737,3 @@ class UnknownChatFormat(Exception):
                  android or iOS was used"):
         self.message = message
         super().__init__(self.message)
-        
-        
-        
-chat_ = Chat()
