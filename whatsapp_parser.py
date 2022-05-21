@@ -1,186 +1,142 @@
-from typing import List, Dict, Tuple, Any
+from typing import List, Tuple, Any
 import pandas as pd
 import numpy as np
 import datetime
-import matplotlib.pyplot as plt
-import seaborn as sns
 import urllib
 import emoji as emoji_util
-import re
 import spacy
-from wordcloud import WordCloud, STOPWORDS
+import re
 from nltk import ngrams
-import chart_studio.plotly as py
-import cufflinks as cf
-import plotly.express as px
-import plotly.graph_objects as go
-from scipy.signal import find_peaks
-
 
 # TODO:
-    # assign self. variables from functions
-    
+# delete all 'messages' from df entries with 'is_image' = True
+# add function that extracts all senders from df and puts into self.senders
+
 class Chat:
-    def __init__(self):
+    def __init__(self, path_to_chat: str, nlp_parsing: bool = False, chat_language: str = 'german'):
         self.senders = []
         self.chat_raw = []
         self.chat_df = pd.DataFrame()
         self.chat_format = ""
-        self.path_to_chat = ""
-        
-    def load_chat_file(path_to_chat: str) -> List[str]:      
+        self.path_to_chat = path_to_chat
+        self.nlp = nlp_parsing
+        self.language = chat_language
+
+        if self.language in ('deutsch', 'german', 'deu', 'ger'):
+            self.lang_dict = {'image_identification_message_ios': 'Bild weggelassen',
+                              'image_identification_message_android': '.jpg (',
+                              'nlp_model_name': 'de_core_news_md',
+                              'stopword_file_name': 'stopwords_ger.txt'}
+
+        elif self.language.lower() in ('englisch', 'english', 'eng', 'us'):
+            self.lang_dict = {'image_identification_message_ios':'image omitted',
+                              'image_identification_message_android': '.jpg (',
+                              'nlp_model_name': 'en_core_web_md',
+                              'stopword_file_name': 'stopwords_eng.txt'}
+        else:
+            raise ValueError('No proper language give. Only english and german supported')
+
+    def load_chat_file(self):
         """
         Load a whatsapp chat export .txt file
-
-        Parameters
-        ----------
-        path_to_chat : str
-            Path to the .txt file of the whatsapp chat export.
-
-        Returns
-        -------
-        List[str]
-            List where every element is a single chat message.
-
         """
-        
-        with open(path_to_chat, 'r', encoding = 'UTF-8') as infile:
+
+        with open(self.path_to_chat, 'r', encoding='UTF-8') as infile:
             # read whole file
             chat = infile.read()
             # split lines at newline (not an actual CRLF!)
-            chat = chat.split('\n') #type(list)
-            # remove \u200e lines since they are only contained in auto 
-            # generated info messages from Whatsapp
-            chat = [line for line in chat if r'\u200e' not in repr(line)]
-            chat = [line for line in chat if "Sicherheitsnummer" not in line]
+            chat = chat.split('\n')  # List[str]
+            chat = [line.replace('\u200e', '') for line in chat if repr(line.startswith('\u200e'))]
             # delete last entry because it contains only "\n"
             del chat[-1]
-            
-            return chat #type(list)
-        
-    def determine_chat_format(chat_raw: list) -> str:
+
+        self.chat_raw = chat  # List[str]
+
+    def determine_chat_format(self):
         """
         Find out what device was used to export the chat file.
         Android format is different from iOS in terms of timestamp.
         iOS: "[dd.mm.yy, HH:MM:SS]"
         Android: "dd.mm.yy, HH:MM:SS"
-
-        Parameters
-        ----------
-        chat_raw : list
-            Takes chat_raw load via load_chat_file().
-
-        Returns
-        -------
-        str
-            returns "ios" or "android" depending on found format.
-
         """
-        
+
         # take 20 random messages out of the chat and check their format
-        ### ANDROID: 0; iOS: 1 ###
-        
+        # ANDROID: 0; iOS: 1
+        if len(self.chat_raw) == 0:
+            raise Warning("chat has not been loaded yet or is empty or unreadable")
+
         result_list = []
-        
-        for n in np.random.randint(0, high=len(chat_raw), size=20):
-            if str(chat_raw[n]).startswith('['):     
+
+        for n in np.random.randint(0, high=len(self.chat_raw), size=20):
+            if str(self.chat_raw[n]).startswith('['):
                 result_list.append(1)
-            elif str(chat_raw[n])[0].isdigit():
+            elif str(self.chat_raw[n])[0].isdigit():
                 result_list.append(0)
             else:
                 continue
         try:
             result = sum(result_list) / len(result_list)
-        except ZeroDivisionError as e:
+        except ZeroDivisionError:
             raise UnknownChatFormat
-    
+
         if result > 0.9:
-            return "ios"
+            self.chat_format = "ios"
         elif result < 0.1:
-            return "android"
+            self.chat_format = "android"
         else:
-            raise UnknownChatFormat()
-            
-        
-    def check_message_integrity_ios(chat_raw: List[str]) -> List[str]:
+            raise UnknownChatFormat
+
+    def check_message_integrity_ios(self):
         """
         Check if line is a valid ios message with timestamp, sender and message.
         Sometimes lines are split by CRLF respectively \n in this case.
         Put split messages back together in this case.
-
-        Parameters
-        ----------
-        chat_raw : List[str]
-            Takes chat_raw load via load_chat_file().
-
-        Returns
-        -------
-        List[str]
-            Returns integrity checked chat_raw.
-
         """
-    
+
         # get indices of split messages which do not start with '['
-        split_messages_idx = [idx for idx, line in enumerate(chat_raw) \
+        split_messages_idx = [idx for idx, line in enumerate(self.chat_raw)
                               if not line.startswith('[')]
-    
+
         # iterate from bottom to top to not mess up indices
         # when deleting entries
         for idx in sorted(split_messages_idx, reverse=True):
             # iterate over split messages and
             # merge them with the message send before
-            merged_message = chat_raw[idx-1] + ' ' + chat_raw[idx] # str
-            chat_raw[idx-1] = merged_message
-            
+            merged_message = self.chat_raw[idx - 1] + ' ' + self.chat_raw[idx]  # str
+            self.chat_raw[idx - 1] = merged_message
+
             # delete original split message by index after merging
-            del chat_raw[idx]   
-        
-        return chat_raw # List[str]
+            del self.chat_raw[idx]
 
-
-    def check_message_integrity_android(chat_raw: List[str]) -> List[str]:
+    def check_message_integrity_android(self):
         """
         Check if line is a valid android message with timestamp, 
         sender and message.
         Sometimes lines are cut off by CRLF respectively \n in this case.
         Put split messages back together in this case.
-
-        Parameters
-        ----------
-        chat_raw : List[str]
-            Takes chat_raw load via load_chat_file().
-
-        Returns
-        -------
-        List[str]
-            Returns integrity checked chat_raw.
-
         """
 
         # check if all lines start with a timestamp and
         # get indices of split messages
         split_messages_idx = []
-        for idx, line in enumerate(chat_raw):
+        for idx, line in enumerate(self.chat_raw):
             try:
                 datetime.datetime.strptime(line[:15], '%d.%m.%y, %H:%M')
             except ValueError:
                 split_messages_idx.append(idx)
-    
+
         # iterate from bottom to top to not mess up indices
         # when deleting entries
         for idx in sorted(split_messages_idx, reverse=True):
             # iterate over split messages and merge them with the
             # message send before
-            merged_message = chat_raw[idx-1] + ' ' + chat_raw[idx] # str
-            chat_raw[idx-1] = merged_message
-            
+            merged_message = self.chat_raw[idx - 1] + ' ' + self.chat_raw[idx]  # str
+            self.chat_raw[idx - 1] = merged_message
+
             # delete split messages by index after merging
-            del chat_raw[idx]
-        
-        return chat_raw # List[str]
-    
-    
-    def parse_date_ios(line: str) -> datetime.datetime:
+            del self.chat_raw[idx]
+
+    def parse_date_ios(self, line: str) -> datetime.datetime or str:
         """
         Takes single element of chat_raw of an ios chat_raw and returns date.
 
@@ -192,22 +148,23 @@ class Chat:
         Returns
         -------
         datetime.datetime
-            returns happened datetime.datetime of chat message.
+            happened datetime.datetime of chat message.
 
         """
         # split every line of chat between the first brackets
         try:
             date_string = line.split('[')[1].split(']')[0]
             # create datetime obj from remaining date format dd.mm.yy, HH:MM:SS
-            message_date = datetime.datetime.strptime(date_string, '%d.%m.%y, %H:%M:%S') # datetime.datetime
+            message_date = datetime.datetime.strptime(date_string, '%d.%m.%y, %H:%M:%S')  # datetime.datetime
             return message_date
-        except:
-            return "unparsable"
-        
-    
-    def parse_date_android(line: str) -> datetime.datetime:
+        except ValueError:
+            return "unparsable date"
+        except IndexError:
+            return "unparsable timestamp"
+
+    def parse_date_android(self, line: str) -> datetime.datetime or str:
         """
-        Takes single element of chat_raw of an android chat_raw 
+        Takes single element of chat_raw of an android chat_raw
         and returns its date.
 
         Parameters
@@ -225,13 +182,12 @@ class Chat:
         date_string = line.split('-')[0].strip()
         # create datetime obj from remaining date format dd.mm.yy, HH:MM:SS
         try:
-            message_date = datetime.datetime.strptime(date_string, '%d.%m.%y, %H:%M') # datetime.datetime
+            message_date = datetime.datetime.strptime(date_string, '%d.%m.%y, %H:%M')  # datetime.datetime
             return message_date
         except IndexError:
             return "unparsable"
-        
-        
-    def get_message_sender_android(line: str) -> str:
+
+    def get_message_sender_android(self, line: str) -> str:
         """
         Get the sender of a single android chat message
 
@@ -252,8 +208,7 @@ class Chat:
         except IndexError:
             return "unparsable"
 
-
-    def get_message_sender_ios(line: str) -> str:
+    def get_message_sender_ios(self, line: str) -> str:
         """
         Get the sender of a single ios chat message
 
@@ -274,8 +229,7 @@ class Chat:
         except IndexError:
             return "unparsable"
 
-
-    def chop_message_ios(line: str) -> str:
+    def chop_message_ios(self, line: str) -> str:
         """
         Extract the actual message from a raw ios message.
         Chop timestamp and sender to only get raw text.
@@ -293,11 +247,11 @@ class Chat:
         """
         # split at 3rd ':', which indicates message start after sender tag
         try:
-            return line.split(':', 3)[3].strip() # str
-        except:
+            return line.split(':', 3)[3].strip()  # str
+        except IndexError:
             return "unparsable"
 
-    def chop_message_android(line: str) -> str:
+    def chop_message_android(self, line: str) -> str:
         """
         Extract the actual message from a raw android message.
         Chop timestamp and sender to only get raw text.
@@ -315,12 +269,11 @@ class Chat:
         """
         # therefore split at 2nd ':', which indicates message start after sender tag
         try:
-            return line.split(':', 2)[2].strip() #type(str)
-        except:
+            return line.split(':', 2)[2].strip()  # type(str)
+        except IndexError:
             return "unparsable"
-        
 
-    def get_emojis(message: str) -> List[any]:
+    def get_emojis(self, message: str) -> List[any]:
         """
         Returns a list of all emojis in a message
 
@@ -335,12 +288,9 @@ class Chat:
             returns list of all emojis used in the message.
 
         """
-        emojis_in_message = [char for char in message \
-                             if char in emoji_util.UNICODE_EMOJI['en']]
-        return emojis_in_message
+        return [char for char in message if char in emoji_util.UNICODE_EMOJI['en']]
 
-    
-    def demojize_message(message: str) -> str:
+    def demojize_message(self, message: str) -> str:
         """
         Remove emojis from message text.
 
@@ -360,16 +310,14 @@ class Chat:
         # replace all emojis in message with whitespace
         for emoji in emojis_in_message:
             message = message.replace(emoji, ' ')
-        
+
         return message
 
+    def annotate_message_types(self,
+                               reply_time_threshold:
+                               datetime.timedelta = datetime.timedelta(days=2)
+                               ):
 
-    def annotate_message_types(chat_df: pd.DataFrame,
-                               chat_format: str,
-                               reply_time_threshold: 
-                                   datetime.timedelta=datetime.timedelta(days=2)
-                               ) -> pd.DataFrame:
-        
         """
         Iterate over chat_df and check if message is an reply, 
         follow up or new initiation of the conversation.
@@ -394,80 +342,49 @@ class Chat:
         
         Parameters
         ----------
-        chat_df : pd.DataFrame
-            The dataframe representation of the chat.
-            
-        chat_format : str
-            Chat format, either "ios" or "android".
-            
-        answer_time_threshold : datetime.timedelta
+        reply_time_threshold : datetime.timedelta
             Timedelta threshold between two messages indicates a new initiation
             of the conversation.
 
-        Returns
-        -------
-        chat_df : pd.DataFrame
-            The chat_df annotated with message types.
-        
         """
-        
-        if chat_format == 'ios':
-            media_identification_msg = "Bild weggelassen"
-        elif chat_format == 'android':
-            media_identification_msg = "<Medien ausgeschlossen>"
-        else:
-            raise UnknownChatFormat()
-        
-        for idx, row in chat_df.iterrows():
-    
+
+        for idx, row in self.chat_df.iterrows():
             if idx == 0:
                 # first message is always an initiation and has no time diff or reply time
-                chat_df.at[idx, 'message_type'] = "initiation"
-                chat_df.at[idx, 'is_media'] = False
+                self.chat_df.at[idx, 'message_type'] = "initiation"
                 continue
-            
-            # check if message is a picture or video
-            if row['demojized_msg'] == media_identification_msg:
-                chat_df.at[idx, 'is_media'] = True
-                chat_df.at[idx, 'demojized_msg'] = ""
-                chat_df.at[idx, 'message'] = ""
-            else:
-                chat_df.at[idx, 'is_media'] = False
-            
+
             # get sender and time_diff between messages
             sender_b = row['sender']
-            sender_a = chat_df.iloc[idx-1]['sender']
-            time_delta = row['time_diff'] # datetime.timedelta
-            
+            sender_a = self.chat_df.iloc[idx - 1]['sender']
+            time_delta = row['time_diff']  # datetime.timedelta
+
             # determine wheather the message is a reply, follow up or initiation
             if sender_b == sender_a:
                 if time_delta < reply_time_threshold:
                     # if sender_a and sender_b are the same and 
                     # time between the two messages is < reply_time_threshold,
                     # then it's a "follow up"
-                    chat_df.at[idx, 'message_type'] = "follow_up"
+                    self.chat_df.at[idx, 'message_type'] = "follow_up"
                 else:
                     # if between messages is > reply_time_threshold, 
                     # then it's a new initiation of the conversation
                     # the recipient didn't respond to the previous message :(
-                    chat_df.at[idx, 'message_type'] = "initiation"
-    
+                    self.chat_df.at[idx, 'message_type'] = "initiation"
+
             if sender_a != sender_b:
                 if time_delta < reply_time_threshold:
                     # if sender_a and sender_b are NOT the same and
                     # time between the two messages < reply_time_threshold,
                     # then it's an reply
-                    chat_df.at[idx, 'message_type'] = "reply"
-                    chat_df.at[idx, 'reply_time_seconds'] = time_delta.seconds
+                    self.chat_df.at[idx, 'message_type'] = "reply"
+                    self.chat_df.at[idx, 'reply_time_seconds'] = time_delta.seconds
                 else:
                     # if time is > reply_time_threshold then it's a
                     # new initiation (or maybe just a sorry? ¯\_(ツ)_/¯)
-                    chat_df.at[idx, 'message_type'] = "initiation"
-    
-        return chat_df
+                    self.chat_df.at[idx, 'message_type'] = "initiation"
 
-
-    def is_media(message: str) -> bool:
+    def is_image(self, message: str) -> bool:
         """
         Returns True if the sent message was an image or video
 
@@ -479,17 +396,22 @@ class Chat:
         Returns
         -------
         bool
-            Indicator if message was image or video.
+            Indicator if message was an image
 
         """
+        if self.chat_format == 'ios':
+            if re.search(self.lang_dict['image_identification_message_ios'], message) is not None:
+                return True
+            else:
+                return False
 
-        if message == "Bild weggelassen" or message == "<Medien ausgeschlossen>":
-            return True
-        else:
-            return False
+        elif self.chat_format == 'android':
+            if re.search("IMG-[0-9]*-WA[0-9]*.jpg", message) is not None:
+                return True
+            else:
+                return False
 
-
-    def get_ngrams(message: str, n: int) -> List[Tuple]:
+    def get_ngrams(self, message: str, n: int) -> List[Tuple]:
         """
         Generate a list of tuples with all ngrams for a given string.
 
@@ -509,9 +431,8 @@ class Chat:
 
         n_grams = ngrams(message, n)
         return [n for n in n_grams]
-    
 
-    def annotate_questions(spacy_doc: Any) -> bool:
+    def annotate_questions(self, spacy_doc: Any) -> bool:
         """
         Returns True if message is a question.
 
@@ -531,14 +452,13 @@ class Chat:
         else:
             return False
 
-
-    def check_for_url(message: str) -> bool:
+    def check_for_url(self, msg: str) -> bool:
         """
         Returns True if the sent message contains URL
 
         Parameters
         ----------
-        message : str
+        msg : str
             message element of chat_df.
 
         Returns
@@ -547,14 +467,13 @@ class Chat:
             Returns True if the sent message contains URL.
 
         """
-        
+
         if "www" in msg or "http" in msg:
             return True
         else:
             return False
 
-
-    def get_url_domain(input_string: str) -> str:
+    def get_url_domain(self, input_string: str) -> str or None:
         """
         Extract domains out of URLs in messages.
 
@@ -579,12 +498,11 @@ class Chat:
                     return input_string.split('http://')[1].split('/')[0]
                 except IndexError:
                     return None
-        
+
         else:
             return domain
 
-
-    def get_lemma(token: spacy.tokens.token.Token) -> str:
+    def get_lemma(self, token: spacy.tokens.token.Token) -> str:
         """
         Takes spacy token and return lemma of the token, if possible.
         If not, returns string representation of the token.
@@ -597,143 +515,123 @@ class Chat:
         Returns
         -------
         str
-            Returns lemma if exists. Else returns just the text.
+            Lemma if exists. Else returns just the text.
 
         """
-        
+
         if token.lemma_:
             return token.lemma_
         else:
             return token.text
 
-    @staticmethod
-    def parse_chat(path_to_chat: str) -> pd.DataFrame:
+    def parse_chat(self):
         start_time = datetime.datetime.now()
-        chat = load_chat(path_to_chat) # List[str]
-        chat_format = determine_chat_format(chat) # str
-        
-        if chat_format.lower() == "android":
-            chat = check_message_integrity_android(chat) # List[str]
-        elif chat_format.lower() == "ios":
-            chat = check_message_integrity_ios(chat) # List[str]
-        
-        chat_df = pd.DataFrame(chat, columns=['message_raw'])
+        self.load_chat_file()  # List[str]
+        self.determine_chat_format()  # str
+
+        if self.chat_format == "android":
+            self.check_message_integrity_android()  # List[str]
+        elif self.chat_format == "ios":
+            self.check_message_integrity_ios()  # List[str]
+
+        self.chat_df = pd.DataFrame(self.chat_raw, columns=['message_raw'])
         print(f"df time: {datetime.datetime.now() - start_time}")
-    
-        cache_time = datetime.datetime.now()
-        if chat_format.lower() == 'ios':
-            chat_df['sender'] = chat_df['message_raw']\
-                .apply(lambda x: get_message_sender_ios(x))
-                
-            chat_df['timestamp'] = chat_df['message_raw']\
-                .apply(lambda x: parse_date_ios(x))
-                
-            chat_df['message'] = chat_df['message_raw']\
-                .apply(lambda x: chop_message_ios(x))
-    
+
+        if self.chat_format == 'ios':
+            self.chat_df['sender'] = self.chat_df['message_raw'].apply(lambda x: self.get_message_sender_ios(x))
+            self.chat_df['timestamp'] = self.chat_df['message_raw'].apply(lambda x: self.parse_date_ios(x))
+            self.chat_df['message'] = self.chat_df['message_raw'].apply(lambda x: self.chop_message_ios(x))
         else:
-            chat_df['sender'] = chat_df['message_raw']\
-                .apply(lambda x: get_message_sender_android(x))
-                
-            chat_df['timestamp'] = chat_df['message_raw']\
-                .apply(lambda x: parse_date_android(x))
-                
-            chat_df['message'] = chat_df['message_raw']\
-                .apply(lambda x: chop_message_android(x))
-    
+            self.chat_df['sender'] = self.chat_df['message_raw'].apply(lambda x: self.get_message_sender_android(x))
+            self.chat_df['timestamp'] = self.chat_df['message_raw'].apply(lambda x: self.parse_date_android(x))
+            self.chat_df['message'] = self.chat_df['message_raw'].apply(lambda x: self.chop_message_android(x))
+
         # drop messages without valid timestamp (parsing errors) 
-        chat_df = chat_df[chat_df['timestamp']\
-                          .apply(lambda x: isinstance(x, datetime.datetime))]
-        chat_df = chat_df.sort_values('timestamp').reset_index(drop=True)
-        
+        self.chat_df = self.chat_df[self.chat_df['timestamp'].apply(lambda x: isinstance(x, datetime.datetime))]
+        self.chat_df = self.chat_df.sort_values('timestamp').reset_index(drop=True)
+
         # further timestamp extractions
-        cache_time = datetime.datetime.now()
-        chat_df['date'] = chat_df['timestamp'].apply(lambda x: x.date())
-        chat_df['time'] = chat_df['timestamp'].apply(lambda x: x.time())
-        chat_df['weekday'] = chat_df['timestamp']\
-            .apply(lambda x: x.strftime('%A'))
-        chat_df['hour'] = chat_df['time'].apply(lambda x: x.hour)
-        print(
-            f"timestamp annotations time: "\
-            f"{datetime.datetime.now() - cache_time}")
-        
+        self.chat_df['date'] = self.chat_df['timestamp'].apply(lambda x: x.date())
+        self.chat_df['time'] = self.chat_df['timestamp'].apply(lambda x: x.time())
+        self.chat_df['weekday'] = self.chat_df['timestamp'].apply(lambda x: x.strftime('%A'))
+        self.chat_df['hour'] = self.chat_df['time'].apply(lambda x: x.hour)
+
         # extract emojis
-        cache_time = datetime.datetime.now()
-        chat_df['emojis'] = chat_df['message'].apply(lambda x: get_emojis(x))
-        print(f"emoji extract time: {datetime.datetime.now() - cache_time}")
-        cache_time = datetime.datetime.now() 
-        chat_df['demojized_msg'] = chat_df['message']\
-            .apply(lambda x: demojize_message(x))
-        print(f"demojize time: {datetime.datetime.now() - cache_time}")
-    
+        self.chat_df['emojis'] = self.chat_df['message'].apply(lambda x: self.get_emojis(x))
+        self.chat_df['demojized_msg'] = self.chat_df['message'].apply(lambda x: self.demojize_message(x))
+
         # annotations for message type and reply time
         cache_time = datetime.datetime.now()
-        chat_df['time_diff'] = chat_df['timestamp'] - chat_df['timestamp'].shift(periods=1)
-        chat_df = annotate_message_types(chat_df, chat_format)
-        chat_df['is_media'] = chat_df['message'].apply(lambda x: is_media(x))
+        self.chat_df['time_diff'] = self.chat_df['timestamp'] - self.chat_df['timestamp'].shift(periods=1)
+        self.annotate_message_types()
+        self.chat_df['is_image'] = self.chat_df['message_raw'].apply(lambda x: self.is_image(x))
         print(f"message annotations time: {datetime.datetime.now() - cache_time}")
-    
+
         # parse urls and get domains
         cache_time = datetime.datetime.now()
-        chat_df['has_url'] = chat_df['message'].apply(check_for_url)
-        chat_df['url_domain'] = chat_df[chat_df['has_url'] == True]\
-            ['message'].apply(lambda x: get_url_domain(x))
-        print(f"url parse and annotations time: "\
-              f"{datetime.datetime.now() - cache_time}")
-    
-        # initialize NLP model
-        cache_time = datetime.datetime.now()
-        nlp = spacy.load("de_core_news_md",
-                         exclude=['senter', 'sentencizer', 'attribute_ruler',
-                                  'parser', 'morphologizer', 'ner'])
-        nlp.remove_pipe("ner")
-        nlp.remove_pipe("parser")
-    
-        # add stopwords by hand
-        with open('stopwords_ger.txt', 'r', encoding='UTF-8') as infile:
-            stopwords = infile.read().splitlines()
-    
-        for w in stopwords:
-            nlp.vocab[w].is_stop = True
-    
-        # NLP parsing
-        chat_df['spacy_doc'] = chat_df['demojized_msg']\
-            .apply(lambda x: nlp(x.lower()))
-            
-        chat_df['words'] = chat_df['spacy_doc']\
-            .apply(lambda x: [token.text for token in x])
-        chat_df['nouns'] = chat_df['spacy_doc']\
-            .apply(lambda doc: [token.text for token in doc
-                                if token.pos_ == "NOUN" 
-                                and token.is_stop == False])
-        chat_df['verbs'] = chat_df['spacy_doc']\
-            .apply(lambda doc: [token.text for token in doc 
-                                if token.pos_ == "VERB" 
-                                and token.is_stop == False])
-            
-        chat_df['lemmas'] = chat_df['spacy_doc']\
-            .apply(lambda doc: [token.lemma_ for token in doc 
-                                if token.is_stop == False 
-                                and token.is_punct == False
-                                and token.lemma_ != " "])
-        
-        chat_df['is_question'] = chat_df['spacy_doc'].apply(annotate_questions)
-    
-        # generate ngrams
-        chat_df['trigrams'] = chat_df['lemmas'].apply(get_ngrams, n=3)
-        chat_df['bigrams'] = chat_df['lemmas'].apply(get_ngrams, n=2)
-        print(f"NLP time: {datetime.datetime.now() - cache_time}")
-    
+        self.chat_df['has_url'] = self.chat_df['message'].apply(self.check_for_url)
+        self.chat_df['url_domain'] = self.chat_df[self.chat_df['has_url'] == True]['message']\
+            .apply(lambda x: self.get_url_domain(x))
+        print(f"url parse and annotations time: {datetime.datetime.now() - cache_time}")
+
+        # if nlp is desired start processing here
+        if self.nlp:
+            # initialize NLP model
+            cache_time = datetime.datetime.now()
+            # check for language
+
+            try:
+                nlp_model = spacy.load(self.lang_dict['nlp_model_name'],
+                                       exclude=['senter', 'sentencizer', 'attribute_ruler',
+                                                'parser', 'morphologizer', 'ner'])
+            except OSError:
+                raise OSError(f"{self.lang_dict['nlp_model_name']} spacy language model not found. Make sure to install via "
+                              f"'python -m spacy download de_core_news_md'")
+
+            nlp_model.remove_pipe("ner")
+            nlp_model.remove_pipe("parser")
+
+            # add stopwords
+            with open(self.lang_dict['stopword_file_name'], 'r', encoding='UTF-8') as infile:
+                stopwords = infile.read().splitlines()
+
+            for w in stopwords:
+                nlp_model.vocab[w].is_stop = True
+
+            # NLP parsing
+            self.chat_df['spacy_doc'] = self.chat_df['demojized_msg'].apply(lambda x: nlp_model(x.lower()))
+            self.chat_df['words'] = self.chat_df['spacy_doc'].apply(lambda x: [token.text for token in x])
+
+            self.chat_df['nouns'] = self.chat_df['spacy_doc'].apply(lambda doc: [token.text for token in doc
+                                                                                 if token.pos_ == "NOUN"
+                                                                                 and token.is_stop is False])
+
+            self.chat_df['verbs'] = self.chat_df['spacy_doc'] \
+                .apply(lambda doc: [token.text for token in doc
+                                    if token.pos_ == "VERB"
+                                    and token.is_stop is False])
+
+            self.chat_df['lemmas'] = self.chat_df['spacy_doc'] \
+                .apply(lambda doc: [token.lemma_ for token in doc
+                                    if token.is_stop is False
+                                    and token.is_punct is False
+                                    and token.lemma_ != " "])
+
+            self.chat_df['is_question'] = self.chat_df['spacy_doc'].apply(self.annotate_questions)
+
+            # generate ngrams
+            self.chat_df['trigrams'] = self.chat_df['lemmas'].apply(self.get_ngrams, n=3)
+            self.chat_df['bigrams'] = self.chat_df['lemmas'].apply(self.get_ngrams, n=2)
+            print(f"NLP time: {datetime.datetime.now() - cache_time}")
+
         print(f"took {datetime.datetime.now() - start_time}")
-        return chat_df
 
 
 class UnknownChatFormat(Exception):
     """
-    Raised when chat format could not be detected
+    Raise when chat format could not be detected
     """
-    
-    def __init__(self, message="Unknown chat format: could not detect if \
-                 android or iOS was used"):
+
+    def __init__(self, message="could not detect if android or iOS was used"):
         self.message = message
         super().__init__(self.message)
