@@ -8,9 +8,6 @@ import spacy
 import re
 from nltk import ngrams
 
-# TODO:
-# delete all 'messages' from df entries with 'is_image' = True
-# add function that extracts all senders from df and puts into self.senders
 
 class Chat:
     def __init__(self, path_to_chat: str, nlp_parsing: bool = False, chat_language: str = 'german'):
@@ -23,13 +20,20 @@ class Chat:
         self.language = chat_language
 
         if self.language in ('deutsch', 'german', 'deu', 'ger'):
-            self.lang_dict = {'image_identification_message_ios': 'Bild weggelassen',
-                              'image_identification_message_android': '.jpg (',
+            self.lang_dict = {'media_identification_messages_ios': [
+                                                                    'bild weggelassen',
+                                                                    'video weggelassen',
+                                                                    'gif weggelassen'
+                                                                   ],
                               'nlp_model_name': 'de_core_news_md',
                               'stopword_file_name': 'stopwords_ger.txt'}
 
         elif self.language.lower() in ('englisch', 'english', 'eng', 'us'):
-            self.lang_dict = {'image_identification_message_ios':'image omitted',
+            self.lang_dict = {'media_identification_messages_ios': [
+                                                                    'image omitted',
+                                                                    'video omitted',
+                                                                    'gif omitted'
+                                                                    ],
                               'image_identification_message_android': '.jpg (',
                               'nlp_model_name': 'en_core_web_md',
                               'stopword_file_name': 'stopwords_eng.txt'}
@@ -384,7 +388,7 @@ class Chat:
                     # new initiation (or maybe just a sorry? ¯\_(ツ)_/¯)
                     self.chat_df.at[idx, 'message_type'] = "initiation"
 
-    def is_image(self, message: str) -> bool:
+    def is_media(self, message: str) -> bool:
         """
         Returns True if the sent message was an image or video
 
@@ -400,7 +404,8 @@ class Chat:
 
         """
         if self.chat_format == 'ios':
-            if re.search(self.lang_dict['image_identification_message_ios'], message) is not None:
+            if any([re.search(pattern, message.lower()) for pattern in
+                    self.lang_dict['media_identification_messages_ios']]):
                 return True
             else:
                 return False
@@ -411,7 +416,7 @@ class Chat:
             else:
                 return False
 
-    def get_ngrams(self, message: str, n: int) -> List[Tuple]:
+    def get_ngrams(self, lemmas: List[str], n: int) -> List[Tuple]:
         """
         Generate a list of tuples with all ngrams for a given string.
 
@@ -429,7 +434,7 @@ class Chat:
 
         """
 
-        n_grams = ngrams(message, n)
+        n_grams = ngrams(lemmas, n)
         return [n for n in n_grams]
 
     def annotate_questions(self, spacy_doc: Any) -> bool:
@@ -546,7 +551,7 @@ class Chat:
             self.chat_df['timestamp'] = self.chat_df['message_raw'].apply(lambda x: self.parse_date_android(x))
             self.chat_df['message'] = self.chat_df['message_raw'].apply(lambda x: self.chop_message_android(x))
 
-        # drop messages without valid timestamp (parsing errors) 
+        # drop messages without valid timestamp (parsing errors)
         self.chat_df = self.chat_df[self.chat_df['timestamp'].apply(lambda x: isinstance(x, datetime.datetime))]
         self.chat_df = self.chat_df.sort_values('timestamp').reset_index(drop=True)
 
@@ -556,6 +561,9 @@ class Chat:
         self.chat_df['weekday'] = self.chat_df['timestamp'].apply(lambda x: x.strftime('%A'))
         self.chat_df['hour'] = self.chat_df['time'].apply(lambda x: x.hour)
 
+        # extract all unique senders
+        self.senders = self.chat_df['sender'].unique().tolist()
+
         # extract emojis
         self.chat_df['emojis'] = self.chat_df['message'].apply(lambda x: self.get_emojis(x))
         self.chat_df['demojized_msg'] = self.chat_df['message'].apply(lambda x: self.demojize_message(x))
@@ -564,7 +572,9 @@ class Chat:
         cache_time = datetime.datetime.now()
         self.chat_df['time_diff'] = self.chat_df['timestamp'] - self.chat_df['timestamp'].shift(periods=1)
         self.annotate_message_types()
-        self.chat_df['is_image'] = self.chat_df['message_raw'].apply(lambda x: self.is_image(x))
+        self.chat_df['is_media'] = self.chat_df['message_raw'].apply(lambda x: self.is_media(x))
+        # set all messages with images to empty strings
+        self.chat_df.loc[self.chat_df['is_media'] == True, ['message', 'demojized_msg']] = ""
         print(f"message annotations time: {datetime.datetime.now() - cache_time}")
 
         # parse urls and get domains
@@ -600,7 +610,8 @@ class Chat:
 
             # NLP parsing
             self.chat_df['spacy_doc'] = self.chat_df['demojized_msg'].apply(lambda x: nlp_model(x.lower()))
-            self.chat_df['words'] = self.chat_df['spacy_doc'].apply(lambda x: [token.text for token in x])
+            self.chat_df['words'] = self.chat_df['spacy_doc'].apply(lambda x: [token.text for token in x
+                                                                               if token.is_stop is False])
 
             self.chat_df['nouns'] = self.chat_df['spacy_doc'].apply(lambda doc: [token.text for token in doc
                                                                                  if token.pos_ == "NOUN"
