@@ -21,22 +21,24 @@ class Chat:
 
         if self.language in ('deutsch', 'german', 'deu', 'ger'):
             self.lang_dict = {'media_identification_messages_ios': [
-                                                                    'bild weggelassen',
-                                                                    'video weggelassen',
-                                                                    'gif weggelassen'
-                                                                   ],
-                              'nlp_model_name': 'de_core_news_md',
-                              'stopword_file_name': 'stopwords_ger.txt'}
+                'bild weggelassen',
+                'video weggelassen',
+                'gif weggelassen',
+                'audio weggelassen'
+            ],
+                'nlp_model_name': 'de_core_news_md',
+                'stopword_file_name': 'stopwords_ger.txt'}
 
         elif self.language.lower() in ('englisch', 'english', 'eng', 'us'):
             self.lang_dict = {'media_identification_messages_ios': [
-                                                                    'image omitted',
-                                                                    'video omitted',
-                                                                    'gif omitted'
-                                                                    ],
-                              'image_identification_message_android': '.jpg (',
-                              'nlp_model_name': 'en_core_web_md',
-                              'stopword_file_name': 'stopwords_eng.txt'}
+                'image omitted',
+                'video omitted',
+                'gif omitted',
+                'audio omitted'
+            ],
+                'image_identification_message_android': '.jpg (',
+                'nlp_model_name': 'en_core_web_md',
+                'stopword_file_name': 'stopwords_eng.txt'}
         else:
             raise ValueError('No proper language give. Only english and german supported')
 
@@ -50,7 +52,13 @@ class Chat:
             chat = infile.read()
             # split lines at newline (not an actual CRLF!)
             chat = chat.split('\n')  # List[str]
-            chat = [line.replace('\u200e', '') for line in chat if repr(line.startswith('\u200e'))]
+            # remove invisible unicode formatting characters
+            # there might be more in some chats
+            for idx, line in enumerate(chat.copy()):
+                if '\u200e' in line:
+                    chat[idx] = line.replace('\u200e', '')
+                if '\u200d' in line:
+                    chat[idx] = line.replace('\u200d', '')
             # delete last entry because it contains only "\n"
             del chat[-1]
 
@@ -93,7 +101,7 @@ class Chat:
     def check_message_integrity_ios(self):
         """
         Check if line is a valid ios message with timestamp, sender and message.
-        Sometimes lines are split by CRLF respectively \n in this case.
+        Sometimes lines are split by CRLF, respectively \n in this case.
         Put split messages back together in this case.
         """
 
@@ -112,11 +120,15 @@ class Chat:
             # delete original split message by index after merging
             del self.chat_raw[idx]
 
+        # dealing with Whatsapp's own system messages is tricky because they mess up statistics and stuff
+        # they don't have a sender so can easily detect them because they only have two ":" without the "sender"-part
+        self.chat_raw = [msg for msg in self.chat_raw if msg.count(':') > 2]
+
     def check_message_integrity_android(self):
         """
         Check if line is a valid android message with timestamp, 
         sender and message.
-        Sometimes lines are cut off by CRLF respectively \n in this case.
+        Sometimes lines are cut off by CRLF, respectively \n in this case.
         Put split messages back together in this case.
         """
 
@@ -363,7 +375,7 @@ class Chat:
             sender_a = self.chat_df.iloc[idx - 1]['sender']
             time_delta = row['time_diff']  # datetime.timedelta
 
-            # determine wheather the message is a reply, follow up or initiation
+            # determine whether the message is a reply, follow up or initiation
             if sender_b == sender_a:
                 if time_delta < reply_time_threshold:
                     # if sender_a and sender_b are the same and 
@@ -380,7 +392,7 @@ class Chat:
                 if time_delta < reply_time_threshold:
                     # if sender_a and sender_b are NOT the same and
                     # time between the two messages < reply_time_threshold,
-                    # then it's an reply
+                    # then it's a reply
                     self.chat_df.at[idx, 'message_type'] = "reply"
                     self.chat_df.at[idx, 'reply_time_seconds'] = time_delta.seconds
                 else:
@@ -422,7 +434,7 @@ class Chat:
 
         Parameters
         ----------
-        message : str
+        lemmas : List[str]
             Chat message in spacy doc format.
         n : int
             Number of n for n-grams.
@@ -459,7 +471,7 @@ class Chat:
 
     def check_for_url(self, msg: str) -> bool:
         """
-        Returns True if the sent message contains URL
+        Returns True if the message contains URL
 
         Parameters
         ----------
@@ -469,7 +481,7 @@ class Chat:
         Returns
         -------
         bool
-            Returns True if the sent message contains URL.
+            Returns True if the message contains URL.
 
         """
 
@@ -580,7 +592,7 @@ class Chat:
         # parse urls and get domains
         cache_time = datetime.datetime.now()
         self.chat_df['has_url'] = self.chat_df['message'].apply(self.check_for_url)
-        self.chat_df['url_domain'] = self.chat_df[self.chat_df['has_url'] == True]['message']\
+        self.chat_df['url_domain'] = self.chat_df[self.chat_df['has_url'] == True]['message'] \
             .apply(lambda x: self.get_url_domain(x))
         print(f"url parse and annotations time: {datetime.datetime.now() - cache_time}")
 
@@ -595,8 +607,9 @@ class Chat:
                                        exclude=['senter', 'sentencizer', 'attribute_ruler',
                                                 'parser', 'morphologizer', 'ner'])
             except OSError:
-                raise OSError(f"{self.lang_dict['nlp_model_name']} spacy language model not found. Make sure to install via "
-                              f"'python -m spacy download de_core_news_md'")
+                raise OSError(
+                    f"{self.lang_dict['nlp_model_name']} spacy language model not found. Make sure to install via "
+                    f"'python -m spacy download de_core_news_md'")
 
             nlp_model.remove_pipe("ner")
             nlp_model.remove_pipe("parser")
@@ -609,24 +622,40 @@ class Chat:
                 nlp_model.vocab[w].is_stop = True
 
             # NLP parsing
-            self.chat_df['spacy_doc'] = self.chat_df['demojized_msg'].apply(lambda x: nlp_model(x.lower()))
-            self.chat_df['words'] = self.chat_df['spacy_doc'].apply(lambda x: [token.text for token in x
-                                                                               if token.is_stop is False])
+            self.chat_df['spacy_doc'] = self.chat_df['demojized_msg'].apply(lambda msg: nlp_model(msg.lower()))
+            self.chat_df['words'] = self.chat_df['spacy_doc'] \
+                .apply(lambda doc: [token.text for token in doc
+                                    if token.is_stop is False
+                                    and token.is_punct is False
+                                    and token.is_bracket is False
+                                    and token.is_quote is False
+                                    and token.is_space is False])
 
-            self.chat_df['nouns'] = self.chat_df['spacy_doc'].apply(lambda doc: [token.text for token in doc
-                                                                                 if token.pos_ == "NOUN"
-                                                                                 and token.is_stop is False])
+            self.chat_df['nouns'] = self.chat_df['spacy_doc'] \
+                .apply(lambda doc: [token.text for token in doc
+                                    if token.pos_ == "NOUN"
+                                    and token.is_stop is False
+                                    and token.is_punct is False
+                                    and token.is_bracket is False
+                                    and token.is_quote is False
+                                    and token.is_space is False])
 
             self.chat_df['verbs'] = self.chat_df['spacy_doc'] \
                 .apply(lambda doc: [token.text for token in doc
                                     if token.pos_ == "VERB"
-                                    and token.is_stop is False])
+                                    and token.is_stop is False
+                                    and token.is_punct is False
+                                    and token.is_bracket is False
+                                    and token.is_quote is False
+                                    and token.is_space is False])
 
             self.chat_df['lemmas'] = self.chat_df['spacy_doc'] \
                 .apply(lambda doc: [token.lemma_ for token in doc
                                     if token.is_stop is False
                                     and token.is_punct is False
-                                    and token.lemma_ != " "])
+                                    and token.is_bracket is False
+                                    and token.is_quote is False
+                                    and token.is_space is False])
 
             self.chat_df['is_question'] = self.chat_df['spacy_doc'].apply(self.annotate_questions)
 
